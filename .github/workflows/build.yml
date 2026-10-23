@@ -1,0 +1,68 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Loyiha papkasini topish
+        run: |
+          G=$(find . -maxdepth 3 -name gradlew -not -path "./.git/*" | head -n 1)
+          if [ -z "$G" ]; then
+            echo "gradlew topilmadi. Repo tarkibi:"
+            find . -maxdepth 2 -not -path "./.git*" | head -50
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$G")" >> "$GITHUB_ENV"
+          echo "Loyiha papkasi: $(dirname "$G")"
+
+      - name: JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Android SDK va NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          set +e
+          yes | "$SDKM" --licenses > /dev/null 2>&1
+
+          "$SDKM" "ndk;29.0.14206865" || "$SDKM" --channel=3 "ndk;29.0.14206865"
+
+          for p in "platforms;android-37.0" "platforms;android-37"; do
+            "$SDKM" "$p" && break
+            "$SDKM" --channel=3 "$p" && break
+          done
+
+          echo "--- O'rnatilgan platformalar ---"
+          ls "$ANDROID_HOME/platforms" || true
+          exit 0
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Build (openDebug)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleOpenDebug --stacktrace
+
+      - name: APK yuklash
+        uses: actions/upload-artifact@v4
+        with:
+          name: Porte-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/open/debug/*.apk
+          if-no-files-found: error
