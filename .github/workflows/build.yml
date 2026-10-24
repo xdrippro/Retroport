@@ -17,7 +17,11 @@ jobs:
 
       - name: Unzip project
         run: |
-          unzip -q -o Asfalt6-Lite.zip -d proj
+          ls -la
+          Z=$(ls *.zip 2>/dev/null | head -1)
+          if [ -z "$Z" ]; then echo "XATO: repozitoriy ildizida .zip fayl yo'q"; exit 1; fi
+          echo "Zip: $Z"
+          unzip -q -o "$Z" -d proj
           P=$(dirname "$(dirname "$(find proj -name prepare.py | head -1)")")
           echo "P=$P" >> "$GITHUB_ENV"
           ls "$P"
