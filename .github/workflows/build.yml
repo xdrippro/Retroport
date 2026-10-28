@@ -1,83 +1,79 @@
-name: GPS Tracker v3 - Build APK
+name: GPS Tracker v3 Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, master]
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: gps-tracker-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
-    name: Build Debug APK
     runs-on: ubuntu-24.04
     timeout-minutes: 40
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v6
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Detect project folder
+      - name: Find Android project
         id: project
         shell: bash
         run: |
-          if [[ -f settings.gradle.kts && -f app/build.gradle.kts ]]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [[ -f settings.gradle && -f app/build.gradle ]]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [[ -f gpsv3/settings.gradle.kts && -f gpsv3/app/build.gradle.kts ]]; then
-            echo "dir=gpsv3" >> "$GITHUB_OUTPUT"
-          elif [[ -f gpsv3/settings.gradle && -f gpsv3/app/build.gradle ]]; then
-            echo "dir=gpsv3" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Could not find Android project. Expected settings.gradle(.kts) and app/build.gradle(.kts) in repository root or gpsv3/."
-            find . -maxdepth 3 -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' -o -name 'build.gradle' -o -name 'build.gradle.kts' \) -print
+          FILE=$(find . -type f \
+            \( -name settings.gradle.kts -o -name settings.gradle \) \
+            -not -path '*/.gradle/*' \
+            -not -path '*/build/*' \
+            | head -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "::error::settings.gradle(.kts) topilmadi"
+            find . -maxdepth 5 -type f | head -200
             exit 1
           fi
 
-      - name: Install Android platforms
-        shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "platforms;android-36" "platforms;android-37" "build-tools;35.0.0"
+          DIR=$(dirname "$FILE")
+          if [ "$DIR" = "." ]; then
+            DIR="$GITHUB_WORKSPACE"
+          else
+            DIR="$GITHUB_WORKSPACE/${DIR#./}"
+          fi
 
-      - name: Set up Gradle if wrapper is missing
-        if: ${{ hashFiles(format('{0}/gradlew', steps.project.outputs.dir)) == '' }}
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Project: $DIR"
+          ls -la "$DIR"
+
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '9.6.0'
 
-      - name: Build debug APK
-        shell: bash
+      - name: Build Debug APK
         working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
-          if [[ -f ./gradlew ]]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon :app:assembleDebug --stacktrace --console=plain
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew --no-daemon assembleDebug --stacktrace
           else
-            gradle --no-daemon :app:assembleDebug --stacktrace --console=plain
+            gradle --no-daemon assembleDebug --stacktrace
           fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GPS-Tracker-v3-debug-APK
-          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          name: GPS-Tracker-debug-APK
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
