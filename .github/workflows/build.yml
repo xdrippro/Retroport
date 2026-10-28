@@ -1,4 +1,4 @@
-name: GPS Tracker Android Build
+name: GPS Tracker v3 - Build APK
 
 on:
   push:
@@ -11,17 +11,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-build-${{ github.ref }}
+  group: gps-tracker-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -33,28 +33,43 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Find Android project directory
+        id: project
+        shell: bash
+        run: |
+          if [[ -f "settings.gradle.kts" && -f "app/build.gradle.kts" ]]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [[ -f "gpsv3/settings.gradle.kts" && -f "gpsv3/app/build.gradle.kts" ]]; then
+            echo "dir=gpsv3" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Android project not found. Expected settings.gradle.kts and app/build.gradle.kts in repository root or gpsv3/."
+            ls -la
+            exit 1
+          fi
+
       - name: Install Android SDK platform
+        shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-37"
+          sdkmanager "platforms;android-37" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-
-      - name: Check project files
-        run: |
-          test -f settings.gradle.kts || { echo "ERROR: settings.gradle.kts topilmadi. Workflow faylini loyiha ildiziga joylashtiring."; exit 1; }
-          test -f app/build.gradle.kts || { echo "ERROR: app/build.gradle.kts topilmadi. Repo ildizi Android loyiha ildizi bo'lishi kerak."; exit 1; }
+          cache-disabled: false
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug --stacktrace --console=plain
+        shell: bash
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          gradle --version
+          gradle --no-daemon :app:assembleDebug --stacktrace --console=plain
 
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: GPS-Tracker-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: GPS-Tracker-v3-debug-APK
+          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
