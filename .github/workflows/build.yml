@@ -1,32 +1,88 @@
-name: Build Android APK
+name: Build APK Fast
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v5
+      - name: Find zip file
+        id: zip
+        shell: bash
+        run: |
+          set -e
+          ZIP="$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)"
+          if [ -z "$ZIP" ]; then
+            echo "ZIP file not found in repo root"
+            exit 1
+          fi
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "Found ZIP: $ZIP"
+
+      - name: Extract project
+        shell: bash
+        run: |
+          set -e
+          rm -rf proj
+          mkdir -p proj
+          unzip -q -o "${{ steps.zip.outputs.zip }}" -d proj
+
+          PREP="$(find proj -type f -name prepare.py | head -n 1)"
+          if [ -z "$PREP" ]; then
+            echo "prepare.py not found inside ZIP"
+            find proj -maxdepth 4 -type f | head -200
+            exit 1
+          fi
+
+          PROJECT_ROOT="$(dirname "$(dirname "$PREP")")"
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+          echo "Project root: $PROJECT_ROOT"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          distribution: zulu
+          distribution: temurin
           java-version: '17'
+          cache: gradle
 
-      - name: Android SDK litsenziyalarini qabul qilish
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+      - name: Prepare project
+        working-directory: ${{ env.PROJECT_ROOT }}
+        shell: bash
+        run: |
+          set -e
+          python3 tools/prepare.py game/game.jar .
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.6.0'
+          gradle-version: '8.5'
 
-      - name: Build
-        run: gradle assembleDebug --console=plain --stacktrace
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_ROOT }}
+        shell: bash
+        run: |
+          set -e
+          ./gradlew :app:assembleRelease \
+            --no-daemon \
+            --build-cache \
+            --max-workers=2 \
+            --console=plain \
+            --stacktrace
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: GpsTracker-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Retroport-APK
+          path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
