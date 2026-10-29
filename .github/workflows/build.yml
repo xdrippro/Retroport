@@ -1,10 +1,17 @@
-name: Build Android APK
+name: Build Android (universal)
 
 on:
   push:
     branches: [ "main", "master" ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      task:
+        description: "Gradle vazifasi (assembleDebug, assembleRelease, bundleRelease ...)"
+        default: "assembleDebug"
+      java:
+        description: "Java versiyasi"
+        default: "21"
 
 concurrency:
   group: build-${{ github.ref }}
@@ -13,38 +20,84 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
-      # Loyiha repo ildizida ham, ichki papkada ham bo'lsa topadi
-      - name: Gradle loyihasini topish
+      # 1) Loyihani topish (zip bo'lsa ochadi), Gradle versiyasini aniqlash
+      - name: Loyihani aniqlash
         id: find
+        shell: bash
         run: |
-          f=$(find . -name settings.gradle.kts -not -path '*/build/*' -print -quit)
-          if [ -z "$f" ]; then echo "settings.gradle.kts topilmadi"; ls -R | head -50; exit 1; fi
+          find_settings() {
+            find . \( -name settings.gradle.kts -o -name settings.gradle \) \
+              -not -path '*/build/*' -not -path './.git/*' -print -quit
+          }
+          f=$(find_settings)
+
+          if [ -z "$f" ]; then
+            echo "Gradle loyihasi topilmadi, zip qidirilmoqda..."
+            n=0
+            find . -iname '*.zip' -not -path './.git/*' -not -path './extracted/*' -print0 |
+            while IFS= read -r -d '' z; do
+              n=$((n+1)); echo "Ochilmoqda: $z"
+              unzip -q -o "$z" -d "extracted/$n" || true
+            done
+            f=$(find_settings)
+          fi
+
+          if [ -z "$f" ]; then
+            echo "::error::settings.gradle(.kts) topilmadi. Repo tarkibi:"
+            ls -la; exit 1
+          fi
+
           d=$(dirname "$f")
-          echo "dir=$d" >> "$GITHUB_OUTPUT"
           echo "Loyiha papkasi: $d"
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+
+          if [ -f "$d/gradlew" ] && [ -f "$d/gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "wrapper=true" >> "$GITHUB_OUTPUT"
+            echo "gradle_version=" >> "$GITHUB_OUTPUT"
+          else
+            v=$(grep -oP 'gradle-\K[0-9][0-9.]*(?=-(bin|all)\.zip)' "$d/gradle/wrapper/gradle-wrapper.properties" 2>/dev/null | head -n1)
+            echo "wrapper=false" >> "$GITHUB_OUTPUT"
+            echo "gradle_version=${v:-current}" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ github.event.inputs.java || '21' }}
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.6.0'
+          gradle-version: ${{ steps.find.outputs.gradle_version }}
 
-      - name: Debug APK build
+      - name: Android litsenziyalari
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+      # 2) Build
+      - name: Build
         working-directory: ${{ steps.find.outputs.dir }}
-        run: gradle --version && gradle :app:assembleDebug --stacktrace --console=plain
+        shell: bash
+        run: |
+          TASK="${{ github.event.inputs.task || 'assembleDebug' }}"
+          if [ "${{ steps.find.outputs.wrapper }}" = "true" ]; then
+            chmod +x gradlew
+            ./gradlew "$TASK" --stacktrace --console=plain
+          else
+            gradle --version
+            gradle "$TASK" --stacktrace --console=plain
+          fi
 
-      - name: APK ni yuklash
+      # 3) Natijalar
+      - name: APK / AAB yuklash
         uses: actions/upload-artifact@v4
         with:
-          name: GpsTracker-debug-apk
-          path: ${{ steps.find.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          name: android-build
+          path: |
+            ${{ steps.find.outputs.dir }}/**/build/outputs/apk/**/*.apk
+            ${{ steps.find.outputs.dir }}/**/build/outputs/bundle/**/*.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -53,5 +106,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-reports
-          path: ${{ steps.find.outputs.dir }}/app/build/reports/**
+          path: ${{ steps.find.outputs.dir }}/**/build/reports/**
           if-no-files-found: ignore
