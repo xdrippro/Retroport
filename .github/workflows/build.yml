@@ -17,39 +17,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Loyiha repo ildizida ham, ichki papkada ham bo'lsa topadi
+      - name: Gradle loyihasini topish
+        id: find
+        run: |
+          f=$(find . -name settings.gradle.kts -not -path '*/build/*' -print -quit)
+          if [ -z "$f" ]; then echo "settings.gradle.kts topilmadi"; ls -R | head -50; exit 1; fi
+          d=$(dirname "$f")
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+          echo "Loyiha papkasi: $d"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
-      # Gradle versiyasi gradle-wrapper.properties dagi bilan bir xil (9.6.0).
-      # gradlew/wrapper JAR repoda bo'lmasa ham ishlaydi.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
-
-      - name: Android SDK litsenziyalari
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Debug APK build
-        run: gradle :app:assembleDebug --stacktrace --console=plain
+        working-directory: ${{ steps.find.outputs.dir }}
+        run: gradle --version && gradle :app:assembleDebug --stacktrace --console=plain
 
       - name: APK ni yuklash
         uses: actions/upload-artifact@v4
         with:
           name: GpsTracker-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ steps.find.outputs.dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
-      # Build xato bersa, hisobotni yuklaymiz (xatoni topish uchun)
       - name: Xato hisoboti
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-reports
-          path: |
-            app/build/reports/**
-            app/build/outputs/logs/**
+          path: ${{ steps.find.outputs.dir }}/app/build/reports/**
           if-no-files-found: ignore
