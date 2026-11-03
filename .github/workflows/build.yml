@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Jar.zip ni Java va Gradle ishga tushishidan oldin ochamiz
+      # 📦 jar.zip faylini to'g'ri nom bilan ochamiz
       - name: Unzip jar.zip
         run: unzip -q jar.zip -d .
 
@@ -29,6 +29,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-33 build-tools;33.0.0'
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug
